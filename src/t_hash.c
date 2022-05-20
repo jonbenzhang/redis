@@ -37,12 +37,14 @@
 /* Check the length of a number of objects to see if we need to convert a
  * ziplist to a real hash. Note that we only check string encoded objects
  * as their string length can be queried in constant time. */
+// 判断hash 插入新元素,是否需要进行类型转换,如(ziplist->hashtable)，如需要就进行转换
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
     size_t sum = 0;
 
     if (o->encoding != OBJ_ENCODING_ZIPLIST) return;
 
+    // 检查元素有一个大于hash_max_ziplist_value的值,就转化为hashtable
     for (i = start; i <= end; i++) {
         if (!sdsEncodedObject(argv[i]))
             continue;
@@ -53,7 +55,9 @@ void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
         }
         sum += len;
     }
+    // 判断加上元素是否超过了ziplist的最大长度
     if (!ziplistSafeToAdd(o->ptr, sum))
+        // 超过了则转为hashtable
         hashTypeConvert(o, OBJ_ENCODING_HT);
 }
 
@@ -453,6 +457,7 @@ sds hashTypeCurrentObjectNewSds(hashTypeIterator *hi, int what) {
     return sdsfromlonglong(vll);
 }
 
+// 如果存在hash实例则返回，没有则创建一个新的返回
 robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
     robj *o = lookupKeyWrite(c->db,key);
     if (o == NULL) {
@@ -467,6 +472,7 @@ robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
     return o;
 }
 
+// ziplist转为hashtable
 void hashTypeConvertZiplist(robj *o, int enc) {
     serverAssert(o->encoding == OBJ_ENCODING_ZIPLIST);
 
@@ -502,8 +508,10 @@ void hashTypeConvertZiplist(robj *o, int enc) {
     }
 }
 
+//  转换编码
 void hashTypeConvert(robj *o, int enc) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
+        // ziplist转为hashtable
         hashTypeConvertZiplist(o, enc);
     } else if (o->encoding == OBJ_ENCODING_HT) {
         serverPanic("Not implemented");
@@ -532,6 +540,8 @@ void hsetnxCommand(client *c) {
     }
 }
 
+//当元素个数小于512 , 并且值的大小小于64个字节时 , 采用ziplist , 大于的时候采用hashtable,
+// ziplist最大的优势就是存储的时候是连续的内存 , 可以极大的提升cpu的缓存命中率
 void hsetCommand(client *c) {
     int i, created = 0;
     robj *o;
@@ -541,9 +551,12 @@ void hsetCommand(client *c) {
         return;
     }
 
+    // 1. 查找hash的key是否存在，不存在则新建一个，然后在其上进行数据操作
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    // 2.判断hash 插入新元素,是否需要进行类型转换,如(ziplist->hashtable)，如需要就进行转换
     hashTypeTryConversion(o,c->argv,2,c->argc-1);
 
+    // 3.添加kv到 o 的hash表中
     for (i = 2; i < c->argc; i += 2)
         created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
 

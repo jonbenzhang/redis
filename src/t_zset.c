@@ -719,6 +719,7 @@ zskiplistNode *zslLastInLexRange(zskiplist *zsl, zlexrangespec *range) {
  * Ziplist-backed sorted set API
  *----------------------------------------------------------------------------*/
 
+// 获取分数
 double zzlGetScore(unsigned char *sptr) {
     unsigned char *vstr;
     unsigned int vlen;
@@ -727,13 +728,17 @@ double zzlGetScore(unsigned char *sptr) {
     double score;
 
     serverAssert(sptr != NULL);
+    // ziplistGet 通过 sptr 指针获取值。根据节点的编码(前文有说到ziplist节点的编码) 对参数赋值
+    // 如果是字符串，则赋值到 vstr; 如果是整数，则赋值到 vlong。
     serverAssert(ziplistGet(sptr,&vstr,&vlen,&vlong));
 
     if (vstr) {
+        // 如果是字符串，那么存的就是浮点数
         memcpy(buf,vstr,vlen);
         buf[vlen] = '\0';
         score = strtod(buf,NULL);
     } else {
+        // 整数类型就直接赋值
         score = vlong;
     }
 
@@ -997,19 +1002,27 @@ unsigned char *zzlLastInLexRange(unsigned char *zl, zlexrangespec *range) {
 }
 
 unsigned char *zzlFind(unsigned char *zl, sds ele, double *score) {
+    // eptr 是 member 的指针，sptr 是 score 的指针
     unsigned char *eptr = ziplistIndex(zl,0), *sptr;
 
+    // 遍历 ziplist
     while (eptr != NULL) {
+        // 因为 member 和 score 是挨着存储的，所以获取 member 的下一个节点就是 score 啦
         sptr = ziplistNext(zl,eptr);
         serverAssert(sptr != NULL);
 
+        // 对比当前的 member 和要查询的 member 是否相等
+        // zset 中的元素使用sds存储
+        // source 直接string(float)或int
         if (ziplistCompare(eptr,(unsigned char*)ele,sdslen(ele))) {
             /* Matching element, pull out score. */
+            // 如果相等，则获取分数
             if (score != NULL) *score = zzlGetScore(sptr);
             return eptr;
         }
 
         /* Move to next element. */
+        // 不相等则继续往下遍历
         eptr = ziplistNext(zl,sptr);
     }
     return NULL;
@@ -1333,6 +1346,7 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
         unsigned char *eptr;
 
         if ((eptr = zzlFind(zobj->ptr,ele,&curscore)) != NULL) {
+            // 如果key已经存在
             /* NX? Return, same element already exists. */
             if (nx) {
                 *flags |= ZADD_NOP;
@@ -1551,13 +1565,18 @@ void zaddGenericCommand(client *c, int flags) {
     /* The following vars are used in order to track what the command actually
      * did during the execution, to reply to the client and to trigger the
      * notification of keyspace change. */
+    // 以下变量用来标记何种命令被执行，为了给客户端回复，发送事件通知等
+    // 添加的元素个数
     int added = 0;      /* Number of new elements added. */
+    // 更新分值的元素个数
     int updated = 0;    /* Number of elements with updated score. */
+    // 被处理过的元素个数，XX命令下可能为0
     int processed = 0;  /* Number of elements processed, may remain zero with
                            options like XX. */
 
     /* Parse options. At the end 'scoreidx' is set to the argument position
      * of the score of the first score-element pair. */
+    // 解析设置的参数，scoreidx最后为第一个元素的下标
     scoreidx = 2;
     while(scoreidx < c->argc) {
         char *opt = c->argv[scoreidx]->ptr;
@@ -1570,6 +1589,7 @@ void zaddGenericCommand(client *c, int flags) {
     }
 
     /* Turn options into simple to check vars. */
+    // 将操作命令标识flags转换为简单的变量
     int incr = (flags & ZADD_INCR) != 0;
     int nx = (flags & ZADD_NX) != 0;
     int xx = (flags & ZADD_XX) != 0;
@@ -1577,7 +1597,9 @@ void zaddGenericCommand(client *c, int flags) {
 
     /* After the options, we expect to have an even number of args, since
      * we expect any number of score-element pairs. */
+    // 命令中的元素和分值总个数
     elements = c->argc-scoreidx;
+    // 验证元素个数是否成对出现
     if (elements % 2 || !elements) {
         addReply(c,shared.syntaxerr);
         return;
@@ -1585,12 +1607,14 @@ void zaddGenericCommand(client *c, int flags) {
     elements /= 2; /* Now this holds the number of score-element pairs. */
 
     /* Check for incompatible options. */
+    // 检查nx和xx不能同事设定
     if (nx && xx) {
         addReplyError(c,
             "XX and NX options at the same time are not compatible");
         return;
     }
 
+    // 检查：incr操作时，[element，scores]对只能有一个
     if (incr && elements > 1) {
         addReplyError(c,
             "INCR option supports a single increment-element pair");
@@ -1600,21 +1624,31 @@ void zaddGenericCommand(client *c, int flags) {
     /* Start parsing all the scores, we need to emit any syntax error
      * before executing additions to the sorted set, as the command should
      * either execute fully or nothing at all. */
+    // 开始解析所有的分数，验证分数对象是double类型的整数，否则直接退出
+    // 并把分数存入scores
     scores = zmalloc(sizeof(double)*elements);
     for (j = 0; j < elements; j++) {
+        // 从对象中得到double类型的分数，存入scores
         if (getDoubleFromObjectOrReply(c,c->argv[scoreidx+j*2],&scores[j],NULL)
             != C_OK) goto cleanup;
     }
 
     /* Lookup the key and create the sorted set if does not exist. */
+    // 获取key，对应的zset对象
     zobj = lookupKeyWrite(c->db,key);
     if (zobj == NULL) {
+        // 如果键不存在，且设置了xx，则直接回复给客户端，不做任何处理
         if (xx) goto reply_to_client; /* No key + XX option: nothing to do. */
+        // 检查配置参数
+        // 执行到此，说明ziplist最大能存储的节点个数大于0且待添加的元素的长度没有
+        // 超过设定的阈值zset_max_ziplist_value
         if (server.zset_max_ziplist_entries == 0 ||
             server.zset_max_ziplist_value < sdslen(c->argv[scoreidx+1]->ptr))
         {
+            // 创建以skiplist编码的zset对象
             zobj = createZsetObject();
         } else {
+            // 创建以Ziplist编码的zset对象
             zobj = createZsetZiplistObject();
         }
         dbAdd(c->db,key,zobj);

@@ -110,6 +110,7 @@ void aofChildWriteDiffData(aeEventLoop *el, int fd, void *privdata, int mask) {
             return;
         }
         if (block->used > 0) {
+            //通过管道把block->buf里的数据写给子进程
             nwritten = write(server.aof_pipe_write_data_to_child,
                              block->buf,block->used);
             if (nwritten <= 0) return;
@@ -122,6 +123,7 @@ void aofChildWriteDiffData(aeEventLoop *el, int fd, void *privdata, int mask) {
 }
 
 /* Append data to the AOF rewrite buffer, allocating new blocks if needed. */
+// 该函数为主进程调用，是有指令产生时写入len长度的脏数据到aof_rewrite_buf_blocks的函数。
 void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
     listNode *ln = listLast(server.aof_rewrite_buf_blocks);
     aofrwblock *block = ln ? ln->value : NULL;
@@ -130,6 +132,7 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
         /* If we already got at least an allocated block, try appending
          * at least some piece into it. */
         if (block) {
+            // 当前还有空闲块，判断其free是否大于等于len以决定是否需要申请一个新的aofrwblock
             unsigned long thislen = (block->free < len) ? block->free : len;
             if (thislen) {  /* The current block is not already full. */
                 memcpy(block->buf+block->used, s, thislen);
@@ -140,6 +143,7 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
             }
         }
 
+        // 如果该if为真，说明thislen < len，说明s仍有数据未被写入，但是当前的aofrwblock已经满了，这个时候就需要申请一个新的aofrwblock并将其挂在链表尾。
         if (len) { /* First block to allocate, or need another block. */
             int numblocks;
 
@@ -150,8 +154,10 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
 
             /* Log every time we cross more 10 or 100 blocks, respectively
              * as a notice or warning. */
+            // 这里是每10个块或者100个块被申请的时候打一次日志
             numblocks = listLength(server.aof_rewrite_buf_blocks);
             if (((numblocks+1) % 10) == 0) {
+                // 如果是100的时候会提升到WARNING等级，表示有很多的数据没有被写入（因为childWrite会把写完的块删掉）
                 int level = ((numblocks+1) % 100) == 0 ? LL_WARNING :
                                                          LL_NOTICE;
                 serverLog(level,"Background AOF buffer size: %lu MB",
@@ -162,6 +168,8 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
 
     /* Install a file event to send data to the rewrite child if there is
      * not one already. */
+    // 如果没有一个aof_pipe_write_data_to_child的文件写事件被挂载到server.el，创建这一个文件事件，定为AE_WRITABLE
+    // 现在是主进程，如果有管道，通过管道server.aof_pipe_write_data_to_child 给子进程
     if (aeGetFileEvents(server.el,server.aof_pipe_write_data_to_child) == 0) {
         aeCreateFileEvent(server.el, server.aof_pipe_write_data_to_child,
             AE_WRITABLE, aofChildWriteDiffData, NULL);
@@ -171,6 +179,7 @@ void aofRewriteBufferAppend(unsigned char *s, unsigned long len) {
 /* Write the buffer (possibly composed of multiple blocks) into the specified
  * fd. If a short write or any other error happens -1 is returned,
  * otherwise the number of bytes written is returned. */
+// 该函数会遍历整个链表，将尚未写入的数据一次性全部写入到fd中
 ssize_t aofRewriteBufferWrite(int fd) {
     listNode *ln;
     listIter li;
@@ -182,14 +191,17 @@ ssize_t aofRewriteBufferWrite(int fd) {
         ssize_t nwritten;
 
         if (block->used) {
+            // 将每个buf的used字节的数据写到fd中
             nwritten = write(fd,block->buf,block->used);
             if (nwritten != (ssize_t)block->used) {
+                // 如果为0，说明一个字节都没写进去，设为I/O错误
                 if (nwritten == 0) errno = EIO;
                 return -1;
             }
             count += nwritten;
         }
     }
+    // 返回写入的字节数
     return count;
 }
 
@@ -295,12 +307,14 @@ int startAppendOnly(void) {
  * true, and in general it looks just more resilient to retry the write. If
  * there is an actual error condition we'll get it at the next try. */
 ssize_t aofWrite(int fd, const char *buf, size_t len) {
+    // aofWrite提供了一种更通用的写入方式。
     ssize_t nwritten = 0, totwritten = 0;
 
     while(len) {
         nwritten = write(fd, buf, len);
 
         if (nwritten < 0) {
+            // 如果是因为系统中断导致的写入失败，那么继续尝试写入
             if (errno == EINTR) {
                 continue;
             }
@@ -334,11 +348,13 @@ ssize_t aofWrite(int fd, const char *buf, size_t len) {
  * However if force is set to 1 we'll write regardless of the background
  * fsync. */
 #define AOF_WRITE_LOG_ERROR_RATE 30 /* Seconds between errors logging. */
+// aof buf 刷入文件
 void flushAppendOnlyFile(int force) {
     ssize_t nwritten;
     int sync_in_progress = 0;
     mstime_t latency;
 
+    // 如果没有数据,则直接返回,不进行刷盘
     if (sdslen(server.aof_buf) == 0) {
         /* Check if we need to do fsync even the aof buffer is empty,
          * because previously in AOF_FSYNC_EVERYSEC mode, fsync is
@@ -356,25 +372,31 @@ void flushAppendOnlyFile(int force) {
     }
 
     if (server.aof_fsync == AOF_FSYNC_EVERYSEC)
+        //判断后台是否有fsync操作正在执行, 如果有sync_in_progress 为true
         sync_in_progress = aofFsyncInProgress();
 
+    //如果没有强制刷盘,可能不会立即进行
     if (server.aof_fsync == AOF_FSYNC_EVERYSEC && !force) {
         /* With this append fsync policy we do background fsyncing.
          * If the fsync is still in progress we can try to delay
          * the write for a couple of seconds. */
         if (sync_in_progress) {
+            // 刷入延期开始时间为0，表示没有任何的执行
             if (server.aof_flush_postponed_start == 0) {
                 /* No previous write postponing, remember that we are
                  * postponing the flush and return. */
+                //先将刷入延期开始时间置为当前时间
                 server.aof_flush_postponed_start = server.unixtime;
                 return;
             } else if (server.unixtime - server.aof_flush_postponed_start < 2) {
+                // 如果距离上次执行刷盘操作没有超过两秒,则直接返回
                 /* We were already waiting for fsync to finish, but for less
                  * than two seconds this is still ok. Postpone again. */
                 return;
             }
             /* Otherwise fall trough, and go write since we can't wait
              * over two seconds. */
+            // 如果后台还有fsync 在执行,并且write已经阻塞2秒以上
             server.aof_delayed_fsync++;
             serverLog(LL_NOTICE,"Asynchronous AOF fsync is taking too long (disk is busy?). Writing the AOF buffer without waiting for fsync to complete, this may slow down Redis.");
         }
@@ -386,13 +408,16 @@ void flushAppendOnlyFile(int force) {
      * or alike */
 
     latencyStartMonitor(latency);
+    // 将server.aof_buf 中缓存的aof日志数据写盘
     nwritten = aofWrite(server.aof_fd,server.aof_buf,sdslen(server.aof_buf));
+    // latency 为aofWrite的耗时
     latencyEndMonitor(latency);
     /* We want to capture different events for delayed writes:
      * when the delay happens with a pending fsync, or with a saving child
      * active, and when the above two conditions are missing.
      * We also use an additional event name to save all samples which is
      * useful for graphing / monitoring purposes. */
+    // latency如果超出给定的时间范围，就加入到延时列表中
     if (sync_in_progress) {
         latencyAddSampleIfNeeded("aof-write-pending-fsync",latency);
     } else if (server.aof_child_pid != -1 || server.rdb_child_pid != -1) {
@@ -403,9 +428,12 @@ void flushAppendOnlyFile(int force) {
     latencyAddSampleIfNeeded("aof-write",latency);
 
     /* We performed the write so reset the postponed flush sentinel to zero. */
+    // 重置刷盘时间
     server.aof_flush_postponed_start = 0;
 
+    // 判断aof日志是否完全写入
     if (nwritten != (ssize_t)sdslen(server.aof_buf)) {
+        // 如果没有完全写入,则把该情况写入日志
         static time_t last_write_error_log = 0;
         int can_log = 0;
 
@@ -431,6 +459,7 @@ void flushAppendOnlyFile(int force) {
                                        (long long)sdslen(server.aof_buf));
             }
 
+            // 是你出新追加到aof文件中的不完整的数据内容
             if (ftruncate(server.aof_fd, server.aof_current_size) == -1) {
                 if (can_log) {
                     serverLog(LL_WARNING, "Could not remove short write "
@@ -477,10 +506,12 @@ void flushAppendOnlyFile(int force) {
             server.aof_last_write_status = C_OK;
         }
     }
+    // 更新写入后的aof文件大小
     server.aof_current_size += nwritten;
 
     /* Re-use AOF buffer when it is small enough. The maximum comes from the
      * arena size of 4k minus some overhead (but is otherwise arbitrary). */
+    // 释放aof_buf
     if ((sdslen(server.aof_buf)+sdsavail(server.aof_buf)) < 4000) {
         sdsclear(server.aof_buf);
     } else {
@@ -491,11 +522,14 @@ void flushAppendOnlyFile(int force) {
 try_fsync:
     /* Don't fsync if no-appendfsync-on-rewrite is set to yes and there are
      * children doing I/O in the background. */
+    // 如果aof正在重写
+    // 并且 bgsave或bfrewriteaof正在执行,直接返回
     if (server.aof_no_fsync_on_rewrite &&
         (server.aof_child_pid != -1 || server.rdb_child_pid != -1))
             return;
 
     /* Perform the fsync if needed. */
+    // 执行fysnc
     if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
         /* redis_fsync is defined as fdatasync() for Linux in order to avoid
          * flushing metadata. */
@@ -515,6 +549,7 @@ try_fsync:
     }
 }
 
+// 将命令转换为sds,以便写入到aof缓冲区中
 sds catAppendOnlyGenericCommand(sds dst, int argc, robj **argv) {
     char buf[32];
     int len, j;
@@ -547,6 +582,8 @@ sds catAppendOnlyGenericCommand(sds dst, int argc, robj **argv) {
  * This command is used in order to translate EXPIRE and PEXPIRE commands
  * into PEXPIREAT command so that we retain precision in the append only
  * file, and the time is always absolute and not relative. */
+// 如expire，perpire, expireat
+// 把时间过期的命令转化为sds,返回
 sds catAppendOnlyExpireAtCommand(sds buf, struct redisCommand *cmd, robj *key, robj *seconds) {
     long long when;
     robj *argv[3];
@@ -577,6 +614,9 @@ sds catAppendOnlyExpireAtCommand(sds buf, struct redisCommand *cmd, robj *key, r
     return buf;
 }
 
+//组装刚执行命令的aof内容buf，将过期时间由相对转成绝对（重点）
+//如果AOF开启的情况，将刚组装的buf放入到server.aof_buf 后
+//如果正在重写aof，将buf写到 server.aof_rewrite_buf_blocks中（在aofRewriteBufferAppend里）
 void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int argc) {
     sds buf = sdsempty();
     robj *tmpargv[3];
@@ -595,6 +635,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
     if (cmd->proc == expireCommand || cmd->proc == pexpireCommand ||
         cmd->proc == expireatCommand) {
         /* Translate EXPIRE/PEXPIRE/EXPIREAT into PEXPIREAT */
+        // 如果该命令属于expire，perpire, expireat这三个纯粹设置过期时间的命令，直接通过catAppendOnlyExpireAtCommand()方法转换成过期命令写到结果sds中。
         buf = catAppendOnlyExpireAtCommand(buf,cmd,argv[1],argv[2]);
     } else if (cmd->proc == setexCommand || cmd->proc == psetexCommand) {
         /* Translate SETEX/PSETEX to SET and PEXPIREAT */
@@ -630,6 +671,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
     /* Append to the AOF buffer. This will be flushed on disk just before
      * of re-entering the event loop, so before the client will get a
      * positive reply about the operation performed. */
+    //如果AOF开启的情况，将刚组装的buf放入到server.aof_buf 后
     if (server.aof_state == AOF_ON)
         server.aof_buf = sdscatlen(server.aof_buf,buf,sdslen(buf));
 
@@ -637,6 +679,7 @@ void feedAppendOnlyFile(struct redisCommand *cmd, int dictid, robj **argv, int a
      * accumulate the differences between the child DB and the current one
      * in a buffer, so that when the child process will do its work we
      * can append the differences to the new append only file. */
+    //如果正在重写aof，将buf写到 server.aof_rewrite_buf_blocks中（在aofRewriteBufferAppend里）
     if (server.aof_child_pid != -1)
         aofRewriteBufferAppend((unsigned char*)buf,sdslen(buf));
 

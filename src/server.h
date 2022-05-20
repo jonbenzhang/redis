@@ -604,6 +604,7 @@ typedef struct RedisModuleDigest {
 #define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */
 #define OBJ_ENCODING_INTSET 6  /* Encoded as intset */
 #define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */
+// embstr 使用SDS_TYPE_8作为底层实现
 #define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */
 #define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */
 #define OBJ_ENCODING_STREAM 10 /* Encoded as a radix tree of listpacks */
@@ -614,12 +615,16 @@ typedef struct RedisModuleDigest {
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
 typedef struct redisObject {
+    // 类型,(字符串,列表,哈希,集合,有序集合),4为字节对齐方式
     unsigned type:4;
+    // 编码(long类型的整数,embstr编码的简单动态字符串,压缩列表等),4为字节对齐方式
     unsigned encoding:4;
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
                             * and most significant 16 bits access time). */
+    // 引用计数
     int refcount;
+    // 指向底层实现数据结构的指针
     void *ptr;
 } robj;
 
@@ -647,7 +652,9 @@ typedef struct clientReplyBlock {
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
+    // 数据库键空间,保存着数据库中的所有键值对
     dict *dict;                 /* The keyspace for this DB */
+    // 过期字典,保存着键的过期时间
     dict *expires;              /* Timeout of keys with a timeout set */
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
     dict *ready_keys;           /* Blocked keys that received a PUSH */
@@ -740,11 +747,13 @@ typedef struct client {
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
     int multibulklen;       /* Number of multi bulk arguments left to read. */
     long bulklen;           /* Length of bulk argument in multi bulk request. */
+    // 返回内容缓存的链表
     list *reply;            /* List of reply objects to send to the client. */
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time. */
+    // 最后一次服务器和client交互的时间
     time_t lastinteraction; /* Time of the last interaction, used for timeout */
     time_t obuf_soft_limit_reached_time;
     int flags;              /* Client flags: CLIENT_* macros. */
@@ -777,12 +786,15 @@ typedef struct client {
     listNode *client_list_node; /* list node in client list */
 
     /* Response buffer */
+    // buf已使用的字节数
     int bufpos;
     char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
 
 struct saveparam {
+    // 秒数
     time_t seconds;
+    // 修改次数
     int changes;
 };
 
@@ -950,6 +962,7 @@ struct redisServer {
                                    the actual 'hz' field value if dynamic-hz
                                    is enabled. */
     int hz;                     /* serverCron() calls frequency in hertz */
+    // 一个数组保存着服务器中的所有数据库
     redisDb *db;
     dict *commands;             /* Command table */
     dict *orig_commands;        /* Command table before command renaming. */
@@ -963,6 +976,7 @@ struct redisServer {
     int arch_bits;              /* 32 or 64 depending on sizeof(long) */
     int cronloops;              /* Number of times the cron function run */
     char runid[CONFIG_RUN_ID_SIZE+1];  /* ID always different at every exec. */
+    // 如果是真,则该instance 为 sentinel
     int sentinel_mode;          /* True if this instance is a Sentinel. */
     size_t initial_memory_usage; /* Bytes used after initialization. */
     int always_show_logo;       /* Show logo even for non-stdout logging. */
@@ -987,6 +1001,7 @@ struct redisServer {
     int sofd;                   /* Unix socket file descriptor */
     int cfd[CONFIG_BINDADDR_MAX];/* Cluster bus listening socket */
     int cfd_count;              /* Used slots in cfd[] */
+    // 一个链表，保存了所有客户端状态结构
     list *clients;              /* List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
     list *clients_pending_write; /* There is to write or install handler. */
@@ -1039,7 +1054,9 @@ struct redisServer {
     long long slowlog_log_slower_than; /* SLOWLOG time limit (to get logged) */
     unsigned long slowlog_max_len;     /* SLOWLOG max number of items logged */
     struct malloc_stats cron_malloc_stats; /* sampled in serverCron(). */
+    // 从网络输入的字节数
     long long stat_net_input_bytes; /* Bytes read from network. */
+    // 从网络输出的字节数
     long long stat_net_output_bytes; /* Bytes written to network. */
     size_t stat_rdb_cow_bytes;      /* Copy on write bytes during RDB saving. */
     size_t stat_aof_cow_bytes;      /* Copy on write bytes during AOF rewrite. */
@@ -1063,7 +1080,9 @@ struct redisServer {
     int active_defrag_cycle_min;       /* minimal effort for defrag in CPU percentage */
     int active_defrag_cycle_max;       /* maximal effort for defrag in CPU percentage */
     unsigned long active_defrag_max_scan_fields; /* maximum number of fields of set/hash/zset/list to process from within the main dict scan */
+    // querybuf的最大容量
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
+    // 服务器的数据库数量,可通过配置文件配置
     int dbnum;                      /* Total number of configured DBs */
     int supervised;                 /* 1 if supervised, 0 otherwise. */
     int supervised_mode;            /* See SUPERVISED_* */
@@ -1071,6 +1090,7 @@ struct redisServer {
     clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_OBUF_COUNT];
     /* AOF persistence */
     int aof_state;                  /* AOF_(ON|OFF|WAIT_REWRITE) */
+    // aof缓存刷盘的方式,有AOF_FSYNC_EVERYSEC,AOF_FSYNC_ALWAYS,AOF_FSYNC_NO
     int aof_fsync;                  /* Kind of fsync() policy */
     char *aof_filename;             /* Name of the AOF file */
     int aof_no_fsync_on_rewrite;    /* Don't fsync if a rewrite is in prog. */
@@ -1081,7 +1101,10 @@ struct redisServer {
     off_t aof_fsync_offset;         /* AOF offset which is already synced to disk. */
     int aof_rewrite_scheduled;      /* Rewrite once BGSAVE terminates. */
     pid_t aof_child_pid;            /* PID if rewriting process */
+    // 只要是有aof的子进程，就把新产生的命令添加上去
     list *aof_rewrite_buf_blocks;   /* Hold changes during an AOF rewrite. */
+    // aof缓冲区
+    // 用于存放每次执行命令后的aof信息
     sds aof_buf;      /* AOF buffer, written before entering the event loop */
     int aof_fd;       /* File descriptor of currently selected AOF file */
     int aof_selected_db; /* Currently selected DB in AOF */
@@ -1098,6 +1121,7 @@ struct redisServer {
     int aof_load_truncated;         /* Don't stop on unexpected AOF EOF. */
     int aof_use_rdb_preamble;       /* Use RDB preamble on AOF rewrites. */
     /* AOF pipes used to communicate between parent and child during rewrite. */
+    // 子进程的管道，用于将server.aof_rewrite_buf_blocks信息给子进程
     int aof_pipe_write_data_to_child;
     int aof_pipe_read_data_from_parent;
     int aof_pipe_write_ack_to_parent;
@@ -1108,14 +1132,18 @@ struct redisServer {
                                       to child process. */
     sds aof_child_diff;             /* AOF diff accumulator child side. */
     /* RDB persistence */
+    // dirty计数器,距离上一次成功执行save 或者bgsave命令后,服务器对数据库状态(服务器中的所有数据库)进行了多少次修改(包括写入,删除,更新等操作)
     long long dirty;                /* Changes to DB from the last save */
+    // 用来记录上一次 开始bgsave 命令备份时，数据库总的修改次数
     long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
     pid_t rdb_child_pid;            /* PID of RDB saving child */
+    // 记录了保存条件的数组，一定时间内的修改次数,便会触发
     struct saveparam *saveparams;   /* Save points array for RDB */
     int saveparamslen;              /* Number of saving points */
     char *rdb_filename;             /* Name of RDB file */
     int rdb_compression;            /* Use compression in RDB? */
     int rdb_checksum;               /* Use RDB checksum? */
+    // 上一次执行保存的时间
     time_t lastsave;                /* Unix time of last successful save */
     time_t lastbgsave_try;          /* Unix time of last attempted bgsave */
     time_t rdb_save_time_last;      /* Time used by last RDB save run. */
@@ -1222,8 +1250,11 @@ struct redisServer {
     /* Zip structure config, see redis.conf for more information  */
     size_t hash_max_ziplist_entries;
     size_t hash_max_ziplist_value;
+    // intset保存的时候，intset的最大长度.超过则转为hashtable. 默认配置为512
     size_t set_max_intset_entries;
+    // zset使用 ziplist 中最大的元素个数，默认为128
     size_t zset_max_ziplist_entries;
+    // zset使用 ziplist 默认元素的最大长度，默认为64
     size_t zset_max_ziplist_value;
     size_t hll_sparse_max_bytes;
     size_t stream_node_max_bytes;

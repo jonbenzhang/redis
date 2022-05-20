@@ -52,6 +52,8 @@ void updateLFU(robj *val) {
 /* Low level key lookup API, not actually called directly from commands
  * implementations that should instead rely on lookupKeyRead(),
  * lookupKeyWrite() and lookupKeyReadWithFlags(). */
+// flags 有两个值: LOOKUP_NONE 一般都是这个；LOOKUP_NOTOUCH 不修改最近访问时间
+// 查找key对应val
 robj *lookupKey(redisDb *db, robj *key, int flags) {
     dictEntry *de = dictFind(db->dict,key->ptr);
     if (de) {
@@ -97,10 +99,18 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
  * for read operations. Even if the key expiry is master-driven, we can
  * correctly report a key is expired on slaves even if the master is lagging
  * expiring our key via DELs in the replication link. */
+// 查找key的读操作，如果key找不到或者已经逻辑上过期返回 NULL，有一些副作用
+//   1 如果key到达过期时间，它会被设备为过期，并且删除
+//   2 更新key的最近访问时间
+//   3 更新全局缓存击中概率
+// flags 有两个值: LOOKUP_NONE 一般都是这个；LOOKUP_NOTOUCH 不修改最近访问时间
+// 查找key,未过期返回
 robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
     robj *val;
 
+    // 检查键是否过期
     if (expireIfNeeded(db,key) == 1) {
+        // 如果key过期了
         /* Key expired. If we are in the context of a master, expireIfNeeded()
          * returns 0 only when the key does not exist at all, so it's safe
          * to return NULL ASAP. */
@@ -130,7 +140,9 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
             return NULL;
         }
     }
+    // 查找key对应的值
     val = lookupKey(db,key,flags);
+    // 更新全局缓存命中率
     if (val == NULL)
         server.stat_keyspace_misses++;
     else
@@ -140,6 +152,7 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
 
 /* Like lookupKeyReadWithFlags(), but does not use any flag, which is the
  * common case. */
+// 从 redisDb 中查找对应的键值对，它首先会调用 expireIfNeeded判断键是否过期并且需要删除，如果未过期，则调用 lookupKey 方法从 dict 哈希表中查找并返回
 robj *lookupKeyRead(redisDb *db, robj *key) {
     return lookupKeyReadWithFlags(db,key,LOOKUP_NONE);
 }
@@ -149,11 +162,14 @@ robj *lookupKeyRead(redisDb *db, robj *key) {
  *
  * Returns the linked value object if the key exists or NULL if the key
  * does not exist in the specified DB. */
+// 返回key对应的值,(如果过期的键就删除)
+//没有就返回null
 robj *lookupKeyWrite(redisDb *db, robj *key) {
     expireIfNeeded(db,key);
     return lookupKey(db,key,LOOKUP_NONE);
 }
 
+// 从 dict 数据哈希表中查找对应的 key值。如果找不到，则直接返回 C_OK；如果找到了，则根据值的类型，调用 addReply 或者 addReplyBulk 方法将值添加到输出缓冲区中。
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply) {
     robj *o = lookupKeyRead(c->db, key);
     if (!o) addReply(c,reply);
@@ -1183,9 +1199,14 @@ int keyIsExpired(redisDb *db, robj *key) {
  *
  * The return value of the function is 0 if the key is still valid,
  * otherwise the function returns 1 if the key is expired. */
+//  在调用 lookupKey*系列方法前调用该方法。
+//如果是slave：slave 并不主动过期删除key，但是返回值仍然会返回键已经被删除。
+//master 如果key过期了，会主动删除过期键，并且触发 AOF 和同步操作。返回值为0表示键仍然有效，否则返回1
 int expireIfNeeded(redisDb *db, robj *key) {
+    // key没有过期
     if (!keyIsExpired(db,key)) return 0;
 
+    // 下面代码都是在key过期的情况下才运行
     /* If we are running in the context of a slave, instead of
      * evicting the expired key from the database, we return ASAP:
      * the slave key expiration is controlled by the master that will
@@ -1194,13 +1215,18 @@ int expireIfNeeded(redisDb *db, robj *key) {
      * Still we try to return the right information to the caller,
      * that is, 0 if we think the key should be still valid, 1 if
      * we think the key is expired at this time. */
+    // 如果是从节点,则直接返回,不进行后面的删除操作
     if (server.masterhost != NULL) return 1;
 
+    // 删除过期key
     /* Delete the key */
     server.stat_expiredkeys++;
+    // 命令传播，到 slave 和 AOF
     propagateExpire(db,key,server.lazyfree_lazy_expire);
+    // 键空间通知使得客户端可以通过订阅频道或模式， 来接收那些以某种方式改动了 Redis 数据集的事件。
     notifyKeyspaceEvent(NOTIFY_EXPIRED,
         "expired",key,db->id);
+    // 如果是惰性删除，调用dbAsyncDelete，否则调用 dbSyncDelete
     return server.lazyfree_lazy_expire ? dbAsyncDelete(db,key) :
                                          dbSyncDelete(db,key);
 }

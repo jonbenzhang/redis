@@ -109,6 +109,11 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;
 
+    // epoll_wait是一个最大阻塞指定毫秒数以监听该epfd是否有事件被触发的函数
+    // state->events储存被触发的事件
+    // eventLoop->setsize为最大监听事件数，retval不会超过这个值
+    // (tvp->tv_sec*1000 + tvp->tv_usec/1000)为最大阻塞毫秒数，-1为持续阻塞（直到epfd有事件被触发）
+    // 所以如果要一直挂起等待有事件就绪，应该传进去tvp=NULL
     retval = epoll_wait(state->epfd,state->events,eventLoop->setsize,
             tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
     if (retval > 0) {
@@ -117,12 +122,14 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
         numevents = retval;
         for (j = 0; j < numevents; j++) {
             int mask = 0;
+            // events是一个指针，+j会执行正确的偏移，偏移到对应的第j个事件
             struct epoll_event *e = state->events+j;
 
             if (e->events & EPOLLIN) mask |= AE_READABLE;
             if (e->events & EPOLLOUT) mask |= AE_WRITABLE;
             if (e->events & EPOLLERR) mask |= AE_WRITABLE;
             if (e->events & EPOLLHUP) mask |= AE_WRITABLE;
+            // 赋值被触发的事件的fd和mask
             eventLoop->fired[j].fd = e->data.fd;
             eventLoop->fired[j].mask = mask;
         }

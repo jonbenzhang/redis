@@ -25,6 +25,15 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.
  * ==========================================================================
  */
+// 参考文档 https://blog.csdn.net/TuxedoLinux/article/details/100135213
+// 1. 重新修改全局environ指针指向
+//2. 重新修改除argv[0]以外的argv指针指向
+//3. 扩容argv[0]
+//4. 通过修改argv[0]的内容设置进程名
+//        不过有一点很费解的是, 理论上来说重新修改argv[0]的指针指向也可以做到修改进程名, 但是
+//        我测试了一下发现不行, 猜测可能系统kernel在创建进程时缓存了argv的const指针,所以在修改
+//argv[0]的指针值时不会生效, 这段验证只是猜测, 未经证实, 有待探究。
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -109,6 +118,8 @@ static int spt_copyenv(int envc, char *oldenv[]) {
 	int i, error;
 	int envsize;
 
+	//如果environ != oldenv则说明environ已经被设置过了
+    //        直接返回成功
 	if (environ != oldenv)
 		return 0;
 
@@ -124,6 +135,7 @@ static int spt_copyenv(int envc, char *oldenv[]) {
 	/* Note that the state after clearenv() failure is undefined, but we'll
 	 * just assume an error means it was left unchanged.
 	 */
+	// 让老的environ失效,但是不释放那片内存
 	if ((error = spt_clearenv())) {
 		environ = oldenv;
 		free(envcopy);
@@ -229,10 +241,13 @@ void spt_init(int argc, char *argv[]) {
 	 * the old memory for the purpose of updating the title so we need
 	 * to keep the original value elsewhere.
 	 */
+	// 这一步很关键, 将原进程名备份
 	if (!(SPT.arg0 = strdup(argv[0])))
 		goto syerr;
 
 #if __GLIBC__
+	// 通过/proc/PID/cmdline文件可以读取任一进程的命令行参数；
+	// GNU C可使用program_invocation_name和program_invocation_short_name找到程序名称。
 	if (!(tmp = strdup(program_invocation_name)))
 		goto syerr;
 

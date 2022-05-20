@@ -268,6 +268,7 @@
 /* Don't let ziplists grow over 1GB in any case, don't wanna risk overflow in
  * zlbytes*/
 #define ZIPLIST_MAX_SAFETY_SIZE (1<<30)
+// 判断ziplist原长度加上新的元素的长度,是否超过了ziplist的最大长度
 int ziplistSafeToAdd(unsigned char* zl, size_t add) {
     size_t len = zl? ziplistBlobLen(zl): 0;
     if (len + add > ZIPLIST_MAX_SAFETY_SIZE)
@@ -280,21 +281,28 @@ int ziplistSafeToAdd(unsigned char* zl, size_t add) {
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
 typedef struct zlentry {
+    // 前驱节点的长度prevrawlen所需要的字节大小
     unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/
+    // 前驱节点的长度
     unsigned int prevrawlen;     /* Previous entry len. */
+    // 编码当前节点长度len所需的字节数
     unsigned int lensize;        /* Bytes used to encode this entry type/len.
                                     For example strings have a 1, 2 or 5 bytes
                                     header. Integers always use a single byte.*/
+    // 当前节点值长度
     unsigned int len;            /* Bytes used to represent the actual entry.
                                     For strings this is just the string length
                                     while for integers it is 1, 2, 3, 4, 8 or
                                     0 (for 4 bit immediate) depending on the
                                     number range. */
+    // 当前节点header的大小 = lensize + prevrawlensize
     unsigned int headersize;     /* prevrawlensize + lensize. */
+    // 当前节点的编码格式
     unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
                                     the entry encoding. However for 4 bits
                                     immediate integers this can assume a range
                                     of values and must be range-checked. */
+    // 指向当前节点的指针
     unsigned char *p;            /* Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */
 } zlentry;

@@ -115,6 +115,8 @@ robj *createEmbeddedStringObject(const char *ptr, size_t len) {
  *
  * The current limit of 44 is chosen so that the biggest string object
  * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */
+// 为什么使用44 作为embstr和sds的界限
+// embstr是一次申请内存,大于44为两次申请内存,避免内存碎片
 #define OBJ_ENCODING_EMBSTR_SIZE_LIMIT 44
 robj *createStringObject(const char *ptr, size_t len) {
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT)
@@ -401,6 +403,7 @@ int checkType(client *c, robj *o, int type) {
     return 0;
 }
 
+// 来判断s是否是一个整形数,如果是则把值存入llval
 int isSdsRepresentableAsLongLong(sds s, long long *llval) {
     return string2ll(s,sdslen(s),llval) ? C_OK : C_ERR;
 }
@@ -428,6 +431,7 @@ void trimStringObjectIfNeeded(robj *o) {
 }
 
 /* Try to encode a string object in order to save space */
+// 优化字符串存储,节省保存空间.如embstr转为int或sds
 robj *tryObjectEncoding(robj *o) {
     long value;
     sds s = o->ptr;
@@ -453,6 +457,7 @@ robj *tryObjectEncoding(robj *o) {
      * Note that we are sure that a string larger than 20 chars is not
      * representable as a 32 nor 64 bit integer. */
     len = sdslen(s);
+    // 如果这个值能转换成整型，且长度小于21，就把编码类型替换为整型
     if (len <= 20 && string2l(s,len,&value)) {
         /* This object is encodable as a long. Try to use a shared object.
          * Note that we avoid using shared integers when maxmemory is used
@@ -483,6 +488,7 @@ robj *tryObjectEncoding(robj *o) {
      * try the EMBSTR encoding which is more efficient.
      * In this representation the object and the SDS string are allocated
      * in the same chunk of memory to save space and cache misses. */
+    // 字符串长度小于44,则转为embstr
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT) {
         robj *emb;
 
@@ -501,6 +507,7 @@ robj *tryObjectEncoding(robj *o) {
      * We do that only for relatively large strings as this branch
      * is only entered if the length of the string is greater than
      * OBJ_ENCODING_EMBSTR_SIZE_LIMIT. */
+    // 缩减sds字符串占用空间
     trimStringObjectIfNeeded(o);
 
     /* Return the original object. */

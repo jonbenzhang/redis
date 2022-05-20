@@ -49,7 +49,9 @@ struct __attribute__ ((__packed__)) sdshdr5 {
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr8 {
+    //  就是字符串的长度
     uint8_t len; /* used */
+    // 字符串的容量
     uint8_t alloc; /* excluding the header and null terminator */
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
     char buf[];
@@ -80,10 +82,13 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_64 4
 #define SDS_TYPE_MASK 7
 #define SDS_TYPE_BITS 3
+// 定sh=到s(动态数组)结构体的头地址
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+//  返回到s(动态数组)结构体的头地址
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
+// 获取sds字符串长度
 static inline size_t sdslen(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -101,6 +106,7 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+// 获取sds字符串空余空间（即alloc - len）
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -127,6 +133,7 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+// 设置sds字符串长度
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -151,6 +158,7 @@ static inline void sdssetlen(sds s, size_t newlen) {
     }
 }
 
+// 增加sds字符串使用长度
 static inline void sdsinclen(sds s, size_t inc) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
@@ -176,6 +184,7 @@ static inline void sdsinclen(sds s, size_t inc) {
     }
 }
 
+// 获取sds字符串容量
 /* sdsalloc() = sdsavail() + sdslen() */
 static inline size_t sdsalloc(const sds s) {
     unsigned char flags = s[-1];
@@ -194,6 +203,7 @@ static inline size_t sdsalloc(const sds s) {
     return 0;
 }
 
+// 设置sds字符串容量。
 static inline void sdssetalloc(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {

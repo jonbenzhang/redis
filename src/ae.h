@@ -78,6 +78,7 @@ typedef struct aeFileEvent {
 /* Time event structure */
 typedef struct aeTimeEvent {
     long long id; /* time event identifier. */
+    // 时间到达时间,存储的事unix时间戳
     long when_sec; /* seconds */
     long when_ms; /* milliseconds */
     aeTimeProc *timeProc;
@@ -88,22 +89,41 @@ typedef struct aeTimeEvent {
 } aeTimeEvent;
 
 /* A fired event */
+// 已就绪事件
 typedef struct aeFiredEvent {
+    // 已就绪文件描述符
     int fd;
+    // 事件类型掩码，
+    // 值可以是 AE_READABLE 或 AE_WRITABLE
+    // 或者是两者的或
     int mask;
 } aeFiredEvent;
 
 /* State of an event based program */
 typedef struct aeEventLoop {
+    // 目前已注册的最大描述符
     int maxfd;   /* highest file descriptor currently registered */
+    // 目前已追踪的最大描述符
     int setsize; /* max number of file descriptors tracked */
+    // 用于生成时间事件 id
     long long timeEventNextId;
+    // 最后一次执行时间事件的时间
     time_t lastTime;     /* Used to detect system clock skew */
+    // 已注册的文件事件
     aeFileEvent *events; /* Registered events */
+    // 多路io复用接口监听到某个socket有事件发生后，redis会把结果保存到fired中，这时候我们可以根据fired数组知道哪个fd发生了什么事件。
+    // 然后就可以根据fd，在events数组中查询到对应的文件处理器，然后根据mask类型获取到对应的回调函数。
+    // 如果是可读事件就调用rfileProc，可写事件就调rfileProc。
+    // 已就绪的文件事件
     aeFiredEvent *fired; /* Fired events */
+    // 时间事件
     aeTimeEvent *timeEventHead;
+    // 事件处理器的开关
     int stop;
+    //这个是处理底层特定API的数据，对于epoll来说，该结构体包含了epoll fd和epoll_event
+    // 每种多路复用对应的数据类型都不同
     void *apidata; /* This is used for polling API specific data */
+    // 在处理事件前要执行的函数
     aeBeforeSleepProc *beforesleep;
     aeBeforeSleepProc *aftersleep;
 } aeEventLoop;
@@ -123,6 +143,7 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id);
 int aeProcessEvents(aeEventLoop *eventLoop, int flags);
 int aeWait(int fd, int mask, long long milliseconds);
 void aeMain(aeEventLoop *eventLoop);
+// 获取IO复用函数名称
 char *aeGetApiName(void);
 void aeSetBeforeSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *beforesleep);
 void aeSetAfterSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *aftersleep);

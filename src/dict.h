@@ -32,7 +32,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
+// 参考文章
+// https://www.cnblogs.com/yinbiao/p/10766357.html
 #include <stdint.h>
 
 #ifndef __DICT_H
@@ -56,6 +57,7 @@ typedef struct dictEntry {
 } dictEntry;
 
 typedef struct dictType {
+    // 计算哈希值的函数
     uint64_t (*hashFunction)(const void *key);
     void *(*keyDup)(void *privdata, const void *key);
     void *(*valDup)(void *privdata, const void *obj);
@@ -67,17 +69,26 @@ typedef struct dictType {
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
 typedef struct dictht {
+    // 哈希表数组
     dictEntry **table;
+    // 哈希表大小
     unsigned long size;
+    // 哈希表大小掩码,用于计算索引值
+    // 总是等于size-1
     unsigned long sizemask;
+    // 哈希表已用节点的数量
     unsigned long used;
 } dictht;
 
 typedef struct dict {
     dictType *type;
+    //私有数据指针
     void *privdata;
     dictht ht[2];
+    // rehash 进行到的bucket的位置
+    // 当rehash不在进行时,值为-1
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+    //当前迭代器数量
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 
@@ -101,10 +112,12 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 #define DICT_HT_INITIAL_SIZE     4
 
 /* ------------------------------- Macros ------------------------------------*/
+// 释放节点中的value
 #define dictFreeVal(d, entry) \
     if ((d)->type->valDestructor) \
         (d)->type->valDestructor((d)->privdata, (entry)->v.val)
 
+// 设置节点中value的值
 #define dictSetVal(d, entry, _val_) do { \
     if ((d)->type->valDup) \
         (entry)->v.val = (d)->type->valDup((d)->privdata, _val_); \
@@ -112,39 +125,55 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
         (entry)->v.val = (_val_); \
 } while(0)
 
+// 设置节点中s64的值
 #define dictSetSignedIntegerVal(entry, _val_) \
     do { (entry)->v.s64 = _val_; } while(0)
 
+// 设置节点中u64的值
 #define dictSetUnsignedIntegerVal(entry, _val_) \
     do { (entry)->v.u64 = _val_; } while(0)
 
+// 设置节点中d的值
 #define dictSetDoubleVal(entry, _val_) \
     do { (entry)->v.d = _val_; } while(0)
 
+// 释放key
 #define dictFreeKey(d, entry) \
     if ((d)->type->keyDestructor) \
         (d)->type->keyDestructor((d)->privdata, (entry)->key)
 
+//如果定义了keyDup则使用keyDup赋值key
+// 节点赋值key
 #define dictSetKey(d, entry, _key_) do { \
     if ((d)->type->keyDup) \
         (entry)->key = (d)->type->keyDup((d)->privdata, _key_); \
     else \
         (entry)->key = (_key_); \
 } while(0)
-
+//如果定义了keyCompare则使用keyCompare比较两个key
+// 比较两个key
 #define dictCompareKeys(d, key1, key2) \
     (((d)->type->keyCompare) ? \
         (d)->type->keyCompare((d)->privdata, key1, key2) : \
         (key1) == (key2))
 
+//计算key的哈希值
 #define dictHashKey(d, key) (d)->type->hashFunction(key)
+//返回dictEntry结点的key
 #define dictGetKey(he) ((he)->key)
+//返回dictEntry结点的val
 #define dictGetVal(he) ((he)->v.val)
+//返回结点有符号的value
 #define dictGetSignedIntegerVal(he) ((he)->v.s64)
+//返回结点无符号的value
 #define dictGetUnsignedIntegerVal(he) ((he)->v.u64)
+//返回结点double型的value
 #define dictGetDoubleVal(he) ((he)->v.d)
+//返回字典槽的数量
 #define dictSlots(d) ((d)->ht[0].size+(d)->ht[1].size)
+//返回字典哈希表中使用的槽的数量
 #define dictSize(d) ((d)->ht[0].used+(d)->ht[1].used)
+// 返回一个dict是否在进行rehash，true表示在rehash
 #define dictIsRehashing(d) ((d)->rehashidx != -1)
 
 /* API */

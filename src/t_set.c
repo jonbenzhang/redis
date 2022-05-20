@@ -60,10 +60,13 @@ int setTypeAdd(robj *subject, sds value) {
             return 1;
         }
     } else if (subject->encoding == OBJ_ENCODING_INTSET) {
+        // 判断新添加的值是否为longlong整数
         if (isSdsRepresentableAsLongLong(value,&llval) == C_OK) {
+            // 新添加的值为longlong整数
             uint8_t success = 0;
             subject->ptr = intsetAdd(subject->ptr,llval,&success);
             if (success) {
+                // 添加val成功,判断intset的长度是否超过最大限制.如果超过就进行类型转换.转换为hastable
                 /* Convert to regular set when the intset contains
                  * too many entries. */
                 size_t max_entries = server.set_max_intset_entries;
@@ -74,6 +77,7 @@ int setTypeAdd(robj *subject, sds value) {
                 return 1;
             }
         } else {
+            // 新添加的值不是整形，进行类型转换(转为hashtable)
             /* Failed to get integer from object, convert to regular set. */
             setTypeConvert(subject,OBJ_ENCODING_HT);
 
@@ -85,6 +89,7 @@ int setTypeAdd(robj *subject, sds value) {
     } else {
         serverPanic("Unknown set encoding");
     }
+    // 添加失败，元素已经存在
     return 0;
 }
 
@@ -268,7 +273,9 @@ void saddCommand(client *c) {
     robj *set;
     int j, added = 0;
 
+    // 根据key,获取对应set对象
     set = lookupKeyWrite(c->db,c->argv[1]);
+    // 对象不存在，创建一个新的，并将它存到数据库
     if (set == NULL) {
         set = setTypeCreate(c->argv[2]->ptr);
         dbAdd(c->db,c->argv[1],set);

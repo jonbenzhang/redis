@@ -28,3 +28,10 @@ deps/lua/src/liblua.a
 .prerequisites
 *.dSYM
 Makefile.dep
+/.idea/.gitignore
+/deps/hiredis.zip
+/.idea/misc.xml
+/.idea/redisSettings.xml
+/.vscode/settings.json
+/.idea/statistic.xml
+/.idea/vcs.xml

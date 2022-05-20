@@ -928,6 +928,7 @@ int hex_digit_to_int(char c) {
  * quotes or closed quotes followed by non space characters
  * as in: "foo"bar or "foo'
  */
+// 字符串分割函数
 sds *sdssplitargs(const char *line, int *argc) {
     const char *p = line;
     char *current = NULL;
