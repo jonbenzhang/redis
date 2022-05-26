@@ -1136,23 +1136,39 @@ struct redisServer {
     long long dirty;                /* Changes to DB from the last save */
     // 用来记录上一次 开始bgsave 命令备份时，数据库总的修改次数
     long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
+    // rdb 的子进程号
     pid_t rdb_child_pid;            /* PID of RDB saving child */
     // 记录了保存条件的数组，一定时间内的修改次数,便会触发
     struct saveparam *saveparams;   /* Save points array for RDB */
     int saveparamslen;              /* Number of saving points */
+    // 备份使用的 rdb文件名称
     char *rdb_filename;             /* Name of RDB file */
+    // rdb数据是否进行压缩,
+    // 默认为yes
     int rdb_compression;            /* Use compression in RDB? */
+    // 存储的rdb是否进行CRC64算法的数据校验,如果希望获取到最大性能提升，可以关闭此功能
     int rdb_checksum;               /* Use RDB checksum? */
-    // 上一次执行保存的时间
+    // 上一次执行保存成功的时间
     time_t lastsave;                /* Unix time of last successful save */
+    // 上次尝试保存的unix的时间
     time_t lastbgsave_try;          /* Unix time of last attempted bgsave */
+    // 上次rdb操作运行所用的时间
     time_t rdb_save_time_last;      /* Time used by last RDB save run. */
+    // 当前rdb操作开始的时间
     time_t rdb_save_time_start;     /* Current RDB save start time. */
+    // 等待合适时间,进行bgsave
     int rdb_bgsave_scheduled;       /* BGSAVE when possible if true. */
+    // rdb 子进程操作类型
     int rdb_child_type;             /* Type of save by active child. */
+    // 最后一次rdb操作的结果
     int lastbgsave_status;          /* C_OK or C_ERR */
+    // 默认为yes,当启用了RDB且最后一次在后台保存数据失败,redis是否停止接收数据
+    // yes: 代表可以继续写入数据
+    // no: 代表不会写入成功,通知用户持久化出现错误
     int stop_writes_on_bgsave_err;  /* Don't allow writes if can't BGSAVE */
+    // 子进程返回rdb状态到父进程的管道
     int rdb_pipe_write_result_to_parent; /* RDB pipes used to return the state */
+    // 父进程返回rdb状态到子进程的管道
     int rdb_pipe_read_result_from_child; /* of each slave in diskless SYNC. */
     /* Pipe and data structures for child -> parent info sharing. */
     int child_info_pipe[2];         /* Pipe used to write the child_info_data. */

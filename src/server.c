@@ -1305,6 +1305,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     } else {
         /* If there is not a background saving/rewrite in progress check if
          * we have to save/rewrite now. */
+        // 根据配置的时间和执行时间来判断是否触发了bgsave
         for (j = 0; j < server.saveparamslen; j++) {
             struct saveparam *sp = server.saveparams+j;
 
@@ -1318,6 +1319,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                  CONFIG_BGSAVE_RETRY_DELAY ||
                  server.lastbgsave_status == C_OK))
             {
+                // 满足条件触发bgsave
                 serverLog(LL_NOTICE,"%d changes in %d seconds. Saving...",
                     sp->changes, (int)sp->seconds);
                 rdbSaveInfo rsi, *rsiptr;
@@ -1327,6 +1329,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             }
         }
 
+        // 判断是否需要进行aof 重写
         /* Trigger an AOF rewrite if needed. */
         if (server.aof_state == AOF_ON &&
             server.rdb_child_pid == -1 &&
@@ -1338,6 +1341,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                 server.aof_rewrite_base_size : 1;
             long long growth = (server.aof_current_size*100/base) - 100;
             if (growth >= server.aof_rewrite_perc) {
+                // 满足条件触发aof重写
                 serverLog(LL_NOTICE,"Starting automatic rewriting of AOF on %lld%% growth",growth);
                 rewriteAppendOnlyFileBackground();
             }

@@ -35,3 +35,4 @@ Makefile.dep
 /.vscode/settings.json
 /.idea/statistic.xml
 /.idea/vcs.xml
+/.idea

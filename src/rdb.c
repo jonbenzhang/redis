@@ -2469,12 +2469,14 @@ int rdbSaveToSlavesSockets(rdbSaveInfo *rsi) {
 }
 
 void saveCommand(client *c) {
+    // 如果在进行rdb备份时, 不能执行save命令
     if (server.rdb_child_pid != -1) {
         addReplyError(c,"Background save already in progress");
         return;
     }
     rdbSaveInfo rsi, *rsiptr;
     rsiptr = rdbPopulateSaveInfo(&rsi);
+    // 调用rdbsave 进行备份
     if (rdbSave(server.rdb_filename,rsiptr) == C_OK) {
         addReply(c,shared.ok);
     } else {
@@ -2488,6 +2490,8 @@ void bgsaveCommand(client *c) {
 
     /* The SCHEDULE option changes the behavior of BGSAVE when an AOF rewrite
      * is in progress. Instead of returning an error a BGSAVE gets scheduled. */
+    // bgsave schedule 命令如果正在执行aof文件重写，那么会在aof重写完成后进行rdb持久化操作，
+    // 这个不断检测是在定时任务serverCron()函数中进行的。
     if (c->argc > 1) {
         if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"schedule")) {
             schedule = 1;
@@ -2501,9 +2505,12 @@ void bgsaveCommand(client *c) {
     rsiptr = rdbPopulateSaveInfo(&rsi);
 
     if (server.rdb_child_pid != -1) {
+        // 正在进行rdb备份时,不再执行bgsave命
         addReplyError(c,"Background save already in progress");
     } else if (server.aof_child_pid != -1) {
+        // 正在进行aof重写
         if (schedule) {
+            // rdb_bgsave_scheduled为1表示,等待aof重写完成进行bgsave
             server.rdb_bgsave_scheduled = 1;
             addReplyStatus(c,"Background saving scheduled");
         } else {
@@ -2512,6 +2519,7 @@ void bgsaveCommand(client *c) {
                 "Use BGSAVE SCHEDULE in order to schedule a BGSAVE whenever "
                 "possible.");
         }
+        // 开始进行bgsave
     } else if (rdbSaveBackground(server.rdb_filename,rsiptr) == C_OK) {
         addReplyStatus(c,"Background saving started");
     } else {
